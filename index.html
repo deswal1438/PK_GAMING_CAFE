@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#05060d" />
+    <meta name="description" content="Book PS5, PS5 VR, Meta Quest, racing simulator and private gaming parties at PK Gaming Cafe in Faridabad." />
+    <meta property="og:title" content="PK Gaming Cafe | PS5, VR & Racing Simulator in Faridabad" />
+    <meta property="og:description" content="Premium gaming sessions, all-access passes and birthday party packages at Omaxe World Street." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/pk-logo.jpeg" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2305060d'/%3E%3Cpath d='M16 16h15c9 0 14 4 14 11s-5 11-14 11h-7v10h-8V16Zm8 7v8h7c4 0 6-1 6-4s-2-4-6-4h-7Z' fill='%23ff6b1a'/%3E%3Cpath d='M34 16h14v7H42v25h-8V16Z' fill='%2362a8ff'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "EntertainmentBusiness",
+        "name": "PK Gaming Cafe",
+        "telephone": "+918979812130",
+        "sameAs": ["https://instagram.com/pk.gamingcafe", "https://wa.me/918979812130"],
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "RR Street, Shop No. 09, Sector 79, Omaxe World Street",
+          "addressLocality": "Faridabad",
+          "addressRegion": "Haryana",
+          "addressCountry": "IN"
+        },
+        "priceRange": "₹₹"
+      }
+    </script>
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="PK Gaming Cafe home">
+          <span class="brand-mark" aria-hidden="true"><span>PK</span></span>
+          <span><strong>PK</strong> GAMING CAFE</span>
+        </a>
+        <nav class="desktop-nav" aria-label="Primary navigation">
+          <a href="#book">Book a session</a>
+          <a href="#experiences">Experiences</a>
+          <a href="#passes">Passes</a>
+          <a href="#contact">Visit us</a>
+        </nav>
+        <a class="button button-small button-orange" href="#book">BOOK NOW</a>
+      </header>
+
+      <main id="top">
+        <section class="hero section-wrap">
+          <div class="hero-copy">
+            <div class="eyebrow"><span class="live-dot"></span> OPEN TODAY · 11:00 AM — 11:00 PM</div>
+            <h1>PLAY MORE.<br /><span>PAY LESS.</span><br />ENJOY MORE.</h1>
+            <p class="hero-lede">Your Faridabad home for PS5 multiplayer, VR worlds, racing laps and birthday memories.</p>
+            <div class="hero-actions">
+              <a class="button button-orange" href="#book">BOOK YOUR SLOT</a>
+              <a class="button button-ghost" href="https://wa.me/918979812130" target="_blank" rel="noreferrer">WHATSAPP US</a>
+            </div>
+            <div class="trust-row" aria-label="Cafe highlights">
+              <span><b>04</b> configurable rigs</span>
+              <span><b>₹199</b> sessions from</span>
+              <span><b>10/10</b> party energy</span>
+            </div>
+          </div>
+          <div class="booking-card neon-border" id="book">
+            <div class="card-heading">
+              <div>
+                <span class="kicker">LIVE AVAILABILITY</span>
+                <h2>Book a gaming slot</h2>
+              </div>
+              <span class="status-pill">PAY AT CAFE</span>
+            </div>
+            <p class="muted">Choose your setup. We’ll keep the slot reserved while the cafe confirms your booking.</p>
+            <form id="booking-form" novalidate>
+              <div class="form-grid two-col">
+                <label>Gaming setup
+                  <select id="service" name="service" required>
+                    <option value="ps5">PlayStation 5</option>
+                    <option value="racing">Racing simulator</option>
+                    <option value="ps5vr">PS5 + VR experience</option>
+                    <option value="meta">Meta VR cricket</option>
+                  </select>
+                </label>
+                <label>Duration
+                  <select id="duration" name="duration" required>
+                    <option value="30">30 minutes</option>
+                    <option value="60" selected>1 hour</option>
+                  </select>
+                </label>
+                <label>Preferred rig
+                  <select id="resource" name="resource" required></select>
+                </label>
+                <label>Date
+                  <input id="date" name="date" type="date" required />
+                </label>
+                <label>Start time
+                  <select id="startTime" name="startTime" required></select>
+                </label>
+              </div>
+              <div class="form-grid two-col">
+                <label>Your name
+                  <input id="customerName" name="customerName" type="text" placeholder="Aarav Sharma" autocomplete="name" required />
+                </label>
+                <label>Mobile number
+                  <input id="phone" name="phone" type="tel" placeholder="98765 43210" inputmode="tel" autocomplete="tel" required />
+                </label>
+              </div>
+              <div class="booking-summary">
+                <div><span>Estimated total</span><strong id="price-preview">₹299</strong></div>
+                <small>Final amount is calculated from cafe pricing. Payment status starts as PENDING.</small>
+              </div>
+              <button class="button button-orange button-full" type="submit">REQUEST BOOKING</button>
+              <p class="form-note" id="form-note" role="status">No payment is taken online in this version.</p>
+            </form>
+          </div>
+        </section>
+
+        <section class="section-wrap section-block" id="experiences">
+          <div class="section-intro">
+            <div><span class="kicker">PICK YOUR LOADOUT</span><h2>Experiences built for the squad</h2></div>
+            <p>Every rig is independently bookable, so one busy setup never blocks the rest of the cafe.</p>
+          </div>
+          <div class="experience-grid">
+            <article class="experience-card card-blue"><span class="experience-index">01</span><div class="experience-icon">◉</div><h3>PlayStation 5</h3><p>Big screen multiplayer with premium controllers.</p><strong>from ₹199 <small>/ 30 min</small></strong></article>
+            <article class="experience-card card-red"><span class="experience-index">02</span><div class="experience-icon">◌</div><h3>Racing simulator</h3><p>Wheel, pedals and the full-circuit feeling.</p><strong>from ₹299 <small>/ 30 min</small></strong></article>
+            <article class="experience-card card-purple"><span class="experience-index">03</span><div class="experience-icon">◍</div><h3>PS5 + VR</h3><p>Switch between a console session and immersive worlds.</p><strong>from ₹299 <small>/ 30 min</small></strong></article>
+            <article class="experience-card card-green"><span class="experience-index">04</span><div class="experience-icon">✦</div><h3>Meta VR cricket</h3><p>Step into the stadium and swing for the boundary.</p><strong>₹349 <small>/ 30 min</small></strong></article>
+          </div>
+        </section>
+
+        <section class="section-wrap section-block split-section" id="passes">
+          <div class="pass-panel neon-border-blue">
+            <div class="pass-top"><span class="kicker">ALL ACCESS GAMING PASS</span><span class="pass-badge">BEST VALUE</span></div>
+            <h2>One pass.<br /><span>All gaming.</span></h2>
+            <p>Switch between PS5, PS5 VR, Meta Quest and racing simulator in one visit.</p>
+            <div class="pass-price"><span>5 HOURS</span><strong>₹2,399</strong></div>
+            <div class="pass-perks"><span>↔ Switch setups</span><span>★ Premium equipment</span><span>♧ Best memories</span></div>
+          </div>
+          <div class="price-table neon-border-purple">
+            <div class="section-intro compact"><div><span class="kicker">PRICING BOARD</span><h2>Simple, transparent rates</h2></div></div>
+            <div class="rate-row"><span>PS5 · 30 min</span><strong>₹199</strong></div>
+            <div class="rate-row"><span>PS5 · 1 hour</span><strong>₹299</strong></div>
+            <div class="rate-row"><span>Racing · 30 min</span><strong>₹299</strong></div>
+            <div class="rate-row"><span>Racing + VR · 30 min</span><strong>₹349</strong></div>
+            <div class="rate-row"><span>Extra controller</span><strong>₹49</strong></div>
+            <p class="micro-note">Prices apply per person. Birthday party packages start at ₹6,000.</p>
+          </div>
+        </section>
+
+        <section class="section-wrap party-banner">
+          <div><span class="kicker">PRIVATE PARTY MODE</span><h2>Make the birthday <span>unforgettable.</span></h2><p>Book the entire cafe for your celebration. 1, 2 and 3 hour packages with meals, music, decoration and cake setup.</p></div>
+          <div class="party-prices"><span><b>1 HR</b> ₹6,000</span><span><b>2 HR</b> ₹10,000</span><span><b>3 HR</b> ₹13,000</span></div>
+          <a href="https://wa.me/918979812130?text=Hi%20PK%20Gaming%20Cafe%2C%20I%20want%20to%20ask%20about%20a%20birthday%20party%20package." class="button button-light" target="_blank" rel="noreferrer">ASK ABOUT PARTIES</a>
+        </section>
+
+        <section class="section-wrap section-block visit-section" id="contact">
+          <div class="visit-copy"><span class="kicker">FIND THE CAFE</span><h2>Bring your crew.<br /><span>We’ll bring the game.</span></h2><p>RR Street, Shop No. 09, Sector 79, Faridabad, Omaxe World Street</p><div class="contact-actions"><a class="button button-orange" href="https://www.google.com/maps/search/?api=1&query=RR%20Street%2C%20Shop%20No.%2009%2C%20Sector%2079%2C%20Faridabad%2C%20Omaxe%20World%20Street" target="_blank" rel="noreferrer">OPEN IN MAPS</a><a class="button button-ghost" href="tel:+918979812130">CALL 89798 12130</a></div></div>
+          <div class="visit-card"><img src="assets/pk-logo.jpeg" alt="PK Gaming Cafe logo" /><div class="visit-links"><a href="https://wa.me/918979812130" target="_blank" rel="noreferrer"><span>WHATSAPP</span><b>Chat with the cafe</b></a><a href="https://instagram.com/pk.gamingcafe" target="_blank" rel="noreferrer"><span>INSTAGRAM</span><b>@pk.gamingcafe</b></a></div></div>
+        </section>
+      </main>
+
+      <footer class="footer section-wrap"><span>© 2026 PK Gaming Cafe</span><span>PLAY TOGETHER · WIN TOGETHER</span><a href="admin.html">Admin</a></footer>
+    </div>
+    <div class="sticky-mobile-actions"><a href="#book">BOOK NOW</a><a href="https://wa.me/918979812130" target="_blank" rel="noreferrer">WHATSAPP</a></div>
+    <div class="toast" id="toast" role="alert" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

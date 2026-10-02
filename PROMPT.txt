@@ -1,0 +1,207 @@
+then another booking overlapping that period must be rejected.
+
+Design the database so different gaming machines/resources can be added later.
+
+Create a resources structure such as:
+
+PS5-01
+PS5-02
+RACING-01
+VR-01
+
+Do not assume the cafe has only one machine.
+
+Make resources configurable.
+
+8. DATABASE
+
+Use MongoDB + Mongoose.
+
+Create sensible models such as:
+
+User
+Resource
+Service
+Booking
+Package
+
+Booking should contain fields similar to:
+
+bookingId
+customerName
+phone
+email
+resourceId
+serviceId
+date
+startTime
+endTime
+duration
+amount
+bookingStatus
+paymentStatus
+createdAt
+updatedAt
+
+Use enums where appropriate.
+
+bookingStatus:
+- PENDING
+- CONFIRMED
+- CANCELLED
+- COMPLETED
+
+paymentStatus:
+- NOT_REQUIRED
+- PENDING
+- SUCCESS
+- FAILED
+- REFUNDED
+
+For the current version, use:
+paymentStatus = PENDING
+
+9. ADMIN PANEL
+
+Create a protected admin dashboard.
+
+Admin should be able to:
+
+- View today's bookings
+- View upcoming bookings
+- View booking details
+- Search booking by ID/mobile number
+- Confirm/cancel booking manually
+- Mark booking completed
+- Manage gaming resources
+- Manage services
+- Change prices
+- Manage packages
+- Block/unblock time slots
+- View basic revenue/booking statistics
+
+Payment integration is NOT required yet.
+
+10. CONTACT
+
+Create one-click buttons:
+
+WhatsApp:
+https://wa.me/918979812130
+
+Phone:
+tel:+918979812130
+
+Instagram:
+https://instagram.com/pk.gamingcafe
+
+Location:
+Use Google Maps link/button placeholder for:
+RR Street, Shop No. 09, Sector 79, Faridabad, Omaxe World Street
+
+Do not invent a different address.
+
+11. SEO
+
+Add:
+- Proper title
+- Meta description
+- Open Graph metadata
+- Favicon support
+- Semantic HTML
+- Local business relevant structured data where appropriate
+
+Suggested title:
+PK Gaming Cafe | PS5, VR & Racing Simulator in Faridabad
+
+12. SECURITY
+
+- Validate all user input server-side
+- Sanitize inputs
+- Never trust frontend prices
+- Calculate booking amount on the server from database pricing
+- Prevent booking manipulation
+- Prevent duplicate/overlapping bookings
+- Protect admin routes
+- Store secrets only in environment variables
+- Do not expose MongoDB credentials
+- Add basic rate limiting where practical
+
+13. FUTURE PAYMENT ARCHITECTURE
+
+IMPORTANT:
+
+Do not implement payment now.
+
+But create a clean payment abstraction/interface so later we can plug in:
+- AU Bank UPI/API
+- Razorpay
+- Cashfree
+- another payment provider
+
+The booking system should eventually work like:
+
+Create Booking
+    ↓
+Create Payment Order
+    ↓
+Customer Payment
+    ↓
+Payment Webhook
+    ↓
+Verify Payment Server-side
+    ↓
+Mark payment SUCCESS
+    ↓
+Confirm Booking
+
+For now stop before the payment step.
+
+14. UX
+
+On mobile:
+- Sticky "BOOK NOW" button
+- Sticky WhatsApp button
+- Easy navigation
+- Large touch-friendly buttons
+- Fast loading
+
+Booking UI should feel like a real commercial booking platform, not a demo.
+
+15. CODE QUALITY
+
+- TypeScript strict mode
+- Reusable components
+- Clean folder structure
+- Separate frontend/backend/database logic
+- No unnecessary dependencies
+- No duplicated pricing data
+- No hardcoded secrets
+- Proper error handling
+- Loading states
+- Empty states
+- Success/error notifications
+- Form validation
+
+16. IMPORTANT IMPLEMENTATION RULE
+
+Before writing code:
+1. Analyze all provided reference images.
+2. Extract the branding, pricing, services and visual style.
+3. Plan the database schema.
+4. Plan the folder structure.
+5. Plan the booking architecture.
+6. Then implement the application.
+
+Do not ask unnecessary questions if a reasonable implementation decision can be made.
+
+At the end:
+- Make sure the project builds successfully.
+- Fix TypeScript errors.
+- Fix lint errors.
+- Test the booking flow.
+- Test overlapping-slot prevention.
+- Test admin functionality.
+- Test mobile responsiveness.
+
+The final result should look like a real premium gaming cafe website, not a generic template.
