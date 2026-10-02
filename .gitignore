@@ -5,3 +5,4 @@ node_modules/
 server/dist/
 .sites-runtime/
 WhatsApp Image *.jpeg
+release/
