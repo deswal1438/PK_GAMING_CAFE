@@ -1,28 +1,246 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 export type PaymentStatus = "PENDING" | "SUCCESS" | "FAILED" | "REFUNDED";
-export type PaymentWebhookEvent = { bookingId: string; status: PaymentStatus; reference?: string; amount?: number };
 
-export interface PaymentProvider {
-  createOrder(input: { bookingId: string; amount: number; customerPhone: string }): Promise<{ providerOrderId: string; checkoutUrl?: string }>;
-  verifyWebhook(rawBody: string, signature: string): PaymentWebhookEvent;
+export type PaymentOrder = {
+  provider: "PINE_LABS_ONLINE";
+  providerOrderId: string;
+  checkoutUrl: string;
+};
+
+export type PaymentWebhookEvent = {
+  eventId: string;
+  bookingId: string;
+  providerOrderId: string;
+  status: PaymentStatus;
+  reference?: string;
+  amountMinorUnits?: number;
+  currency?: string;
+};
+
+export type PaymentOrderStatus = Omit<PaymentWebhookEvent, "eventId">;
+
+export type PineLabsWebhookHeaders = {
+  id: string;
+  timestamp: string;
+  signature: string;
+};
+
+export type CreatePaymentInput = {
+  bookingId: string;
+  amountInRupees: number;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+};
+
+type PineLabsConfig = {
+  baseUrl: string;
+  clientId: string;
+  clientSecret: string;
+  webhookSecret: string;
+  callbackUrl: string;
+  webhookToleranceSeconds?: number;
+};
+
+type PineLabsOrder = {
+  order_id?: string;
+  merchant_order_reference?: string;
+  status?: string;
+  redirect_url?: string;
+  challenge_url?: string;
+  order_amount?: { value?: number; currency?: string };
+  payments?: Array<{
+    id?: string;
+    merchant_payment_reference?: string;
+    acquirer_data?: { rrn?: string; acquirer_reference?: string };
+  }>;
+};
+
+type FetchLike = typeof fetch;
+
+export class PaymentProviderError extends Error {
+  constructor(message: string, readonly statusCode = 502) {
+    super(message);
+    this.name = "PaymentProviderError";
+  }
 }
 
-/** UPI webhook-first adapter. Provider-specific payload mapping stays here. */
-export class UpiWebhookProvider implements PaymentProvider {
-  constructor(private readonly secret: string) {}
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new PaymentProviderError("Unexpected Pine Labs response");
+  return value as Record<string, unknown>;
+}
 
-  async createOrder(input: { bookingId: string; amount: number; customerPhone: string }) {
-    return { providerOrderId: `UPI-${input.bookingId}`, checkoutUrl: undefined };
+function dataObject(value: unknown): Record<string, unknown> {
+  const root = jsonObject(value);
+  return root.data && typeof root.data === "object" && !Array.isArray(root.data) ? root.data as Record<string, unknown> : root;
+}
+
+function toMinorUnits(amountInRupees: number): number {
+  if (!Number.isFinite(amountInRupees) || amountInRupees <= 0) throw new PaymentProviderError("Invalid payment amount", 400);
+  return Math.round(amountInRupees * 100);
+}
+
+function normalizePhone(value: string): string {
+  return value.replace(/\D/g, "").slice(-10);
+}
+
+function splitName(value: string): { firstName: string; lastName: string } {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return { firstName: parts.shift() || "Guest", lastName: parts.join(" ") || "Customer" };
+}
+
+function mapPineLabsStatus(status: string | undefined, eventType?: string): PaymentStatus {
+  const value = String(eventType || status || "").toUpperCase();
+  if (value === "ORDER_PROCESSED" || value === "PROCESSED" || value === "SUCCESS") return "SUCCESS";
+  if (value === "REFUND_PROCESSED" || value === "FULLY_REFUNDED" || value === "PARTIALLY_REFUNDED") return "REFUNDED";
+  if (["PAYMENT_FAILED", "ORDER_FAILED", "ORDER_CANCELLED", "FAILED", "CANCELLED", "ATTEMPTED"].includes(value)) return "FAILED";
+  return "PENDING";
+}
+
+function decodeWebhookSecret(value: string): Buffer {
+  const normalized = value.trim();
+  if (!normalized) throw new PaymentProviderError("Pine Labs webhook secret is not configured", 500);
+  const decoded = Buffer.from(normalized, "base64");
+  const roundTrip = decoded.toString("base64").replace(/=+$/, "");
+  if (!decoded.length || roundTrip !== normalized.replace(/=+$/, "")) throw new PaymentProviderError("Pine Labs webhook secret must be base64 encoded", 500);
+  return decoded;
+}
+
+function signatureCandidates(value: string): string[] {
+  return value.split(/[\s,]+/).map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== "v1");
+}
+
+function constantTimeMatch(expected: string, candidates: string[]): boolean {
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  return candidates.some((candidate) => {
+    const candidateBuffer = Buffer.from(candidate, "utf8");
+    return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer);
+  });
+}
+
+function parseOrder(value: unknown): PineLabsOrder {
+  return dataObject(value) as PineLabsOrder;
+}
+
+function paymentReference(order: PineLabsOrder): string | undefined {
+  const payment = order.payments?.[0];
+  return payment?.acquirer_data?.rrn || payment?.acquirer_data?.acquirer_reference || payment?.merchant_payment_reference || payment?.id;
+}
+
+export class PineLabsOnlineProvider {
+  private accessToken?: { value: string; expiresAt: number };
+  private readonly toleranceSeconds: number;
+
+  constructor(private readonly config: PineLabsConfig, private readonly fetchImpl: FetchLike = fetch) {
+    this.toleranceSeconds = config.webhookToleranceSeconds ?? 300;
   }
 
-  verifyWebhook(rawBody: string, signature: string): PaymentWebhookEvent {
-    const expected = createHmac("sha256", this.secret).update(rawBody).digest("hex");
-    const expectedBuffer = Buffer.from(expected, "utf8");
-    const receivedBuffer = Buffer.from(signature, "utf8");
-    if (expectedBuffer.length !== receivedBuffer.length || !timingSafeEqual(expectedBuffer, receivedBuffer)) throw new Error("Invalid UPI webhook signature");
-    const payload = JSON.parse(rawBody) as { bookingId?: string; status?: PaymentStatus; reference?: string; amount?: number };
-    if (!payload.bookingId || !payload.status) throw new Error("Invalid UPI webhook payload");
-    return { bookingId: payload.bookingId, status: payload.status, reference: payload.reference, amount: payload.amount };
+  private async request(path: string, init: RequestInit, authenticated = true): Promise<unknown> {
+    const headers = new Headers(init.headers);
+    headers.set("content-type", "application/json");
+    headers.set("request-id", randomUUID());
+    headers.set("request-timestamp", new Date().toISOString());
+    if (authenticated) headers.set("authorization", `Bearer ${await this.getAccessToken()}`);
+
+    const response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers });
+    const raw = await response.text();
+    let payload: unknown = {};
+    if (raw) {
+      try { payload = JSON.parse(raw); } catch { payload = { response: raw.slice(0, 300) }; }
+    }
+    if (!response.ok) {
+      const object = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+      const message = String(object.message || object.response_message || `Pine Labs request failed (${response.status})`);
+      throw new PaymentProviderError(message, response.status >= 400 && response.status < 500 ? 400 : 502);
+    }
+    return payload;
+  }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken && Date.now() < this.accessToken.expiresAt - 60_000) return this.accessToken.value;
+    const payload = dataObject(await this.request("/api/auth/v1/token", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: this.config.clientId,
+        client_secret: this.config.clientSecret,
+        grant_type: "client_credentials"
+      })
+    }, false));
+    const token = String(payload.access_token || "");
+    if (!token) throw new PaymentProviderError("Pine Labs token response did not contain access_token");
+    const parsedExpiry = Date.parse(String(payload.expires_at || ""));
+    this.accessToken = { value: token, expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : Date.now() + 5 * 60_000 };
+    return token;
+  }
+
+  async createOrder(input: CreatePaymentInput): Promise<PaymentOrder> {
+    const { firstName, lastName } = splitName(input.customerName);
+    const callback = new URL(this.config.callbackUrl);
+    callback.searchParams.set("bookingId", input.bookingId);
+    const customer: Record<string, string> = {
+      customer_id: input.bookingId,
+      first_name: firstName,
+      last_name: lastName,
+      mobile_number: normalizePhone(input.customerPhone),
+      country_code: "91"
+    };
+    if (input.customerEmail) customer.email_id = input.customerEmail;
+
+    const order = parseOrder(await this.request("/api/checkout/v1/orders", {
+      method: "POST",
+      body: JSON.stringify({
+        merchant_order_reference: input.bookingId,
+        order_amount: { value: toMinorUnits(input.amountInRupees), currency: "INR" },
+        integration_mode: "REDIRECT",
+        allowed_payment_methods: ["UPI", "CARD"],
+        notes: `PK Gaming booking ${input.bookingId}`.slice(0, 100),
+        callback_url: callback.toString(),
+        purchase_details: { customer }
+      })
+    }));
+    const providerOrderId = String(order.order_id || "");
+    const checkoutUrl = String(order.redirect_url || order.challenge_url || "");
+    if (!providerOrderId || !checkoutUrl) throw new PaymentProviderError("Pine Labs checkout response was incomplete");
+    return { provider: "PINE_LABS_ONLINE", providerOrderId, checkoutUrl };
+  }
+
+  async getOrderStatus(bookingId: string): Promise<PaymentOrderStatus> {
+    const order = parseOrder(await this.request(`/api/pay/v1/orders/reference/${encodeURIComponent(bookingId)}`, { method: "GET" }));
+    return {
+      bookingId: String(order.merchant_order_reference || bookingId),
+      providerOrderId: String(order.order_id || ""),
+      status: mapPineLabsStatus(order.status),
+      reference: paymentReference(order),
+      amountMinorUnits: order.order_amount?.value,
+      currency: order.order_amount?.currency
+    };
+  }
+
+  verifyWebhook(rawBody: string, headers: PineLabsWebhookHeaders, nowSeconds = Math.floor(Date.now() / 1000)): PaymentWebhookEvent {
+    if (!headers.id || !headers.timestamp || !headers.signature) throw new PaymentProviderError("Missing Pine Labs webhook headers", 400);
+    const timestamp = Number(headers.timestamp);
+    if (!Number.isInteger(timestamp) || Math.abs(nowSeconds - timestamp) > this.toleranceSeconds) throw new PaymentProviderError("Pine Labs webhook timestamp is outside the allowed window", 400);
+    const signedContent = `${headers.id}.${headers.timestamp}.${rawBody}`;
+    const expected = createHmac("sha256", decodeWebhookSecret(this.config.webhookSecret)).update(signedContent).digest("base64");
+    if (!constantTimeMatch(expected, signatureCandidates(headers.signature))) throw new PaymentProviderError("Invalid Pine Labs webhook signature", 400);
+
+    let payload: Record<string, unknown>;
+    try { payload = jsonObject(JSON.parse(rawBody)); } catch { throw new PaymentProviderError("Invalid Pine Labs webhook JSON", 400); }
+    const eventType = String(payload.event_type || "");
+    const order = parseOrder(payload.data || {});
+    const bookingId = String(order.merchant_order_reference || "");
+    const providerOrderId = String(order.order_id || "");
+    if (!eventType || !bookingId || !providerOrderId) throw new PaymentProviderError("Incomplete Pine Labs webhook payload", 400);
+
+    return {
+      eventId: headers.id,
+      bookingId,
+      providerOrderId,
+      status: mapPineLabsStatus(order.status, eventType),
+      reference: paymentReference(order),
+      amountMinorUnits: order.order_amount?.value,
+      currency: order.order_amount?.currency
+    };
   }
 }

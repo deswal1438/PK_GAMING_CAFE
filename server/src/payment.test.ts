@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import test from "node:test";
+import { PaymentProviderError, PineLabsOnlineProvider } from "./payment.js";
+
+const webhookSecret = Buffer.from("test-webhook-secret").toString("base64");
+
+function provider(fetchImpl: typeof fetch = fetch) {
+  return new PineLabsOnlineProvider({
+    baseUrl: "https://pluraluat.v2.pinepg.in",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    webhookSecret,
+    callbackUrl: "https://example.com/payment-return",
+    webhookToleranceSeconds: 300
+  }, fetchImpl);
+}
+
+test("verifies and maps a Pine Labs ORDER_PROCESSED webhook", () => {
+  const body = JSON.stringify({
+    event_type: "ORDER_PROCESSED",
+    data: {
+      order_id: "order-123",
+      merchant_order_reference: "PK-2026-ABC123",
+      status: "PROCESSED",
+      order_amount: { value: 29900, currency: "INR" },
+      payments: [{ acquirer_data: { rrn: "123456789012" } }]
+    }
+  });
+  const timestamp = "1700000000";
+  const eventId = "event-123";
+  const signature = createHmac("sha256", Buffer.from(webhookSecret, "base64")).update(`${eventId}.${timestamp}.${body}`).digest("base64");
+  const event = provider().verifyWebhook(body, { id: eventId, timestamp, signature: `v1,${signature}` }, Number(timestamp));
+
+  assert.deepEqual(event, {
+    eventId,
+    bookingId: "PK-2026-ABC123",
+    providerOrderId: "order-123",
+    status: "SUCCESS",
+    reference: "123456789012",
+    amountMinorUnits: 29900,
+    currency: "INR"
+  });
+});
+
+test("rejects stale Pine Labs webhooks", () => {
+  const body = JSON.stringify({ event_type: "ORDER_PROCESSED", data: { order_id: "order-1", merchant_order_reference: "booking-1" } });
+  assert.throws(
+    () => provider().verifyWebhook(body, { id: "event-1", timestamp: "100", signature: "v1,invalid" }, 1000),
+    (error) => error instanceof PaymentProviderError && error.message.includes("timestamp")
+  );
+});
+
+test("creates an idempotent hosted checkout order in minor currency units", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    requests.push({ url, body });
+    if (url.endsWith("/api/auth/v1/token")) return new Response(JSON.stringify({ access_token: "token", expires_at: "2099-01-01T00:00:00Z" }), { status: 200 });
+    return new Response(JSON.stringify({ order_id: "order-299", redirect_url: "https://checkout.example/order-299" }), { status: 200 });
+  };
+
+  const order = await provider(fetchImpl).createOrder({
+    bookingId: "PK-2026-ABC123",
+    amountInRupees: 299,
+    customerName: "Amit Deswal",
+    customerPhone: "+91 98765 43210",
+    customerEmail: "amit@example.com"
+  });
+
+  assert.equal(order.providerOrderId, "order-299");
+  assert.equal(order.checkoutUrl, "https://checkout.example/order-299");
+  assert.equal((requests[1]?.body.order_amount as { value: number }).value, 29900);
+  assert.equal(requests[1]?.body.merchant_order_reference, "PK-2026-ABC123");
+});

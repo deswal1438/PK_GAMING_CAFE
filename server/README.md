@@ -1,18 +1,24 @@
 # PK Gaming Cafe API
 
-This is the server-side contract behind the static booking experience.
+Production-oriented booking and Pine Labs Online payment verification API. Complete setup, payment flow, environment reference and go-live checklist repository root [`README.md`](../README.md) mein documented hain.
 
-- MongoDB + Mongoose models cover users, configurable resources, services, bookings, packages and blocked slots.
-- Prices are read from the `Service` document; the client never controls the final amount.
-- An overlap check rejects any active booking on the same resource/date where time ranges intersect.
-- `POST /api/payments/webhook/upi` is the payment seam. It verifies an HMAC signature, maps the provider payload and changes a successful booking from `PENDING` to `CONFIRMED`.
-- Set `MONGODB_URI`, `ADMIN_API_KEY`, `UPI_WEBHOOK_SECRET` and `UPI_WEBHOOK_SIGNATURE_HEADER` through the deployment environment. Never commit the supplied database password.
-
-Run locally after installing dependencies:
+## Quick start
 
 ```powershell
 Copy-Item .env.example .env
-npm install
+npm ci
+npm test
 npm run build
+npm run seed
 npm run dev
 ```
+
+Server MongoDB se price calculate karta hai, overlapping bookings block karta hai, Pine Labs hosted checkout session creates, signed raw-body webhook verify karta hai, order/currency/amount validate karta hai, duplicate events block karta hai and token-protected customer payment status expose karta hai.
+
+Production webhook:
+
+```text
+POST https://your-api.example.com/api/payments/webhook/pine-labs
+```
+
+`.env`, MongoDB credentials, Pine Labs secrets aur admin keys Git ke bahar rakhein.

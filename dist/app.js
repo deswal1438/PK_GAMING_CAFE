@@ -5,7 +5,9 @@ const SERVICES = {
   meta: { label: "Meta VR cricket", prices: { 30: 349, 60: 599 }, resources: ["META-VR-01"] }
 };
 
+const API_BASE_URL = String(window.PK_CONFIG?.apiBaseUrl || "").replace(/\/$/, "");
 const form = document.querySelector("#booking-form");
+const submitButton = form.querySelector("button[type='submit']");
 const serviceInput = document.querySelector("#service");
 const durationInput = document.querySelector("#duration");
 const resourceInput = document.querySelector("#resource");
@@ -27,6 +29,11 @@ function showToast(message) {
   toast.classList.add("is-visible");
   window.clearTimeout(showToast.timeout);
   showToast.timeout = window.setTimeout(() => toast.classList.remove("is-visible"), 4600);
+}
+
+function setMessage(message, success = false) {
+  note.textContent = message;
+  note.style.color = success ? "#86f2a3" : "#ff7180";
 }
 
 function makeTimeOptions() {
@@ -76,13 +83,85 @@ function hasOverlap(candidate, bookings) {
   });
 }
 
-form.addEventListener("submit", (event) => {
+async function apiRequest(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: { "content-type": "application/json", ...(options.headers || {}) }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  return payload;
+}
+
+async function submitOnlineBooking(booking) {
+  const payload = await apiRequest("/api/bookings", {
+    method: "POST",
+    body: JSON.stringify({
+      customerName: booking.customerName,
+      phone: booking.phone,
+      resourceCode: booking.resource,
+      serviceSlug: booking.service,
+      date: booking.date,
+      startTime: booking.startTime,
+      duration: booking.duration
+    })
+  });
+  const paymentSession = { bookingId: payload.bookingId, statusToken: payload.statusToken };
+  localStorage.setItem("pk-payment-session", JSON.stringify(paymentSession));
+  if (payload.payment?.checkoutUrl) {
+    setMessage(`Booking ${payload.bookingId} created. Opening secure Pine Labs checkout…`, true);
+    window.location.assign(payload.payment.checkoutUrl);
+    return;
+  }
+  setMessage(`Booking ${payload.bookingId} created, but online checkout is not configured yet. Please contact the cafe.`, true);
+  showToast(`Booking ${payload.bookingId} created.`);
+}
+
+function submitLocalPreviewBooking(booking) {
+  const bookings = localBookings();
+  if (hasOverlap(booking, bookings)) throw new Error("That rig is already booked for this time. Please choose another slot.");
+  bookings.unshift(booking);
+  saveBookings(bookings);
+  setMessage(`Preview request ${booking.bookingId} saved only on this device.`, true);
+  showToast(`Preview booking ${booking.bookingId} created.`);
+}
+
+async function refreshPaymentStatus() {
+  if (!API_BASE_URL) return;
+  const session = JSON.parse(localStorage.getItem("pk-payment-session") || "null");
+  const returnedBookingId = new URLSearchParams(window.location.search).get("bookingId");
+  if (!session?.bookingId || !session?.statusToken || (returnedBookingId && returnedBookingId !== session.bookingId)) return;
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const status = await apiRequest(`/api/bookings/${encodeURIComponent(session.bookingId)}/payment-status`, {
+        headers: { "x-booking-token": session.statusToken }
+      });
+      if (status.paymentStatus === "SUCCESS") {
+        setMessage(`Payment verified automatically. Booking ${status.bookingId} is confirmed.`, true);
+        showToast("Payment verified — booking confirmed.");
+        return;
+      }
+      if (["FAILED", "REFUNDED"].includes(status.paymentStatus)) {
+        setMessage(`Payment status: ${status.paymentStatus}. Contact the cafe if you need help.`);
+        return;
+      }
+      setMessage(`Payment received by checkout; verification is still pending for ${status.bookingId}.`, true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not check payment status.");
+      return;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+  }
+}
+
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(form);
   const booking = {
     bookingId: `PK-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
     customerName: String(data.get("customerName") || "").trim(),
-    phone: String(data.get("phone") || "").replace(/\D/g, ""),
+    phone: String(data.get("phone") || "").replace(/\D/g, "").slice(-10),
     resource: String(data.get("resource") || ""),
     service: String(data.get("service") || ""),
     date: String(data.get("date") || ""),
@@ -94,33 +173,31 @@ form.addEventListener("submit", (event) => {
     createdAt: new Date().toISOString()
   };
 
-  if (booking.customerName.length < 2 || booking.phone.length < 10 || booking.phone.length > 13) {
-    note.textContent = "Please enter a valid name and 10-digit mobile number.";
-    note.style.color = "#ff7180";
+  if (booking.customerName.length < 2 || booking.phone.length !== 10) {
+    setMessage("Please enter a valid name and 10-digit mobile number.");
     showToast("Check your name and mobile number.");
     return;
   }
   if (booking.amount === 0 || !booking.date || !booking.startTime || !booking.resource) {
-    note.textContent = "Please complete every booking field.";
-    note.style.color = "#ff7180";
-    return;
-  }
-  const bookings = localBookings();
-  if (hasOverlap(booking, bookings)) {
-    note.textContent = "That rig is already booked for this time. Please choose another slot.";
-    note.style.color = "#ff7180";
-    showToast("Overlap blocked — choose another rig or time.");
+    setMessage("Please complete every booking field.");
     return;
   }
 
-  bookings.unshift(booking);
-  saveBookings(bookings);
-  note.textContent = `Request ${booking.bookingId} saved. The cafe will confirm it on WhatsApp.`;
-  note.style.color = "#86f2a3";
-  showToast(`Booking request ${booking.bookingId} created.`);
-  form.reset();
-  setMinimumDate();
-  syncResources();
+  submitButton.disabled = true;
+  submitButton.textContent = API_BASE_URL ? "CREATING SECURE PAYMENT…" : "SAVING PREVIEW…";
+  try {
+    if (API_BASE_URL) await submitOnlineBooking(booking);
+    else submitLocalPreviewBooking(booking);
+    form.reset();
+    setMinimumDate();
+    syncResources();
+  } catch (error) {
+    setMessage(error instanceof Error ? error.message : "Booking could not be created.");
+    showToast("Booking failed — please try again.");
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = API_BASE_URL ? "BOOK & PAY SECURELY" : "REQUEST BOOKING";
+  }
 });
 
 serviceInput.addEventListener("change", syncResources);
@@ -128,3 +205,8 @@ durationInput.addEventListener("change", updatePrice);
 makeTimeOptions();
 setMinimumDate();
 syncResources();
+if (API_BASE_URL) {
+  submitButton.textContent = "BOOK & PAY SECURELY";
+  note.textContent = "Payment is verified server-side through Pine Labs webhooks; screenshots are not accepted as proof.";
+  refreshPaymentStatus();
+}

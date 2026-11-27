@@ -72,9 +72,9 @@
                 <span class="kicker">LIVE AVAILABILITY</span>
                 <h2>Book a gaming slot</h2>
               </div>
-              <span class="status-pill">PAY AT CAFE</span>
+              <span class="status-pill">SECURE PAYMENT</span>
             </div>
-            <p class="muted">Choose your setup. We’ll keep the slot reserved while the cafe confirms your booking.</p>
+            <p class="muted">Choose your setup. When the payment API is configured, Pine Labs securely handles checkout and the server confirms payment automatically.</p>
             <form id="booking-form" novalidate>
               <div class="form-grid two-col">
                 <label>Gaming setup
@@ -114,7 +114,7 @@
                 <small>Final amount is calculated from cafe pricing. Payment status starts as PENDING.</small>
               </div>
               <button class="button button-orange button-full" type="submit">REQUEST BOOKING</button>
-              <p class="form-note" id="form-note" role="status">No payment is taken online in this version.</p>
+              <p class="form-note" id="form-note" role="status">Local preview mode is active until the public API URL is configured.</p>
             </form>
           </div>
           <div class="hero-atmosphere" aria-hidden="true"><img src="assets/all-access.jpeg" alt="" /><span><b>5 HOURS</b><small>ALL ACCESS PASS</small></span></div>
@@ -123,7 +123,7 @@
         <section class="signal-bar section-wrap" aria-label="Booking system status">
           <div class="signal-status"><span class="signal-pulse"></span><span><b>BOOKING SYSTEM ONLINE</b><small>Every rig has its own slot</small></span></div>
           <div class="signal-line"><span>01</span> Choose a setup <i></i><span>02</span> Lock your time <i></i><span>03</span> Get a confirmed status</div>
-          <div class="signal-note">AU UPI webhook-ready flow · no screenshot-based payment claims</div>
+          <div class="signal-note">Pine Labs signed-webhook verification · no screenshot-based payment claims</div>
         </section>
 
         <section class="section-wrap section-block" id="experiences">
@@ -177,7 +177,7 @@
           <div class="section-intro"><div><span class="kicker">GOOD TO KNOW</span><h2>Everything before game time</h2></div><p>Clear answers for first-timers, squads and parents planning a party.</p></div>
           <div class="faq-grid">
             <details open><summary>Can I book one specific machine?</summary><p>Yes. Choose a service, a preferred rig and an exact time. Each resource is scheduled independently, so another setup can still be booked.</p></details>
-            <details><summary>Do I pay online right now?</summary><p>This version records your booking request first. Payment stays PENDING until the AU UPI merchant webhook and server-side status enquiry are connected.</p></details>
+            <details><summary>How is my payment verified?</summary><p>The production flow uses Pine Labs hosted checkout. A signed server-to-server webhook confirms the exact booking reference and amount before your slot changes to CONFIRMED.</p></details>
             <details><summary>Can we switch between experiences?</summary><p>The 5-hour All Access Pass is made for switching between available PS5, VR and racing setups during one visit.</p></details>
             <details><summary>How do birthday parties work?</summary><p>Choose a 1, 2 or 3-hour private-cafe package. We’ll confirm the date, members, meal and decoration details on WhatsApp.</p></details>
           </div>
@@ -193,6 +193,7 @@
     </div>
     <div class="sticky-mobile-actions"><a href="#book">BOOK NOW</a><a href="https://wa.me/918979812130" target="_blank" rel="noreferrer">WHATSAPP</a></div>
     <div class="toast" id="toast" role="alert" aria-live="polite"></div>
+    <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
