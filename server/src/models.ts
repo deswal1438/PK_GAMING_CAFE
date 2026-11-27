@@ -10,14 +10,14 @@ const userSchema = new Schema({
 const resourceSchema = new Schema({
   code: { type: String, trim: true, required: true, unique: true },
   name: { type: String, trim: true, required: true },
-  type: { type: String, enum: ["PS5", "RACING", "VR", "PS5_VR"], required: true },
+  type: { type: String, enum: ["PS5", "RACING", "VR", "PS5_VR", "DEMO"], required: true },
   active: { type: Boolean, default: true }
 }, { timestamps: true });
 
 const serviceSchema = new Schema({
   name: { type: String, trim: true, required: true },
   slug: { type: String, trim: true, required: true, unique: true },
-  resourceType: { type: String, enum: ["PS5", "RACING", "VR", "PS5_VR"], required: true },
+  resourceType: { type: String, enum: ["PS5", "RACING", "VR", "PS5_VR", "DEMO"], required: true },
   prices: { type: Map, of: Number, required: true },
   active: { type: Boolean, default: true }
 }, { timestamps: true });

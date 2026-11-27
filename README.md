@@ -17,13 +17,14 @@ Public booking-first website and payment-ready backend for **PK Gaming Cafe, Far
 | --- | --- |
 | Public marketing website | Live |
 | Booking UI | Ready |
-| Local preview booking | Ready, browser-only |
+| Local preview booking | Disabled (fake/local bookings are not accepted) |
 | MongoDB booking API | Ready for deployment |
 | Pine Labs hosted checkout adapter | Implemented |
 | Signed webhook verification | Implemented |
 | Duplicate webhook protection | Implemented |
 | Amount/order validation | Implemented |
-| Public payment-status polling | Implemented with private booking token |
+| Public payment-status polling | Implemented with private booking token and automatic Pine Labs reconciliation |
+| ₹1 automatic verification demo | Implemented; hidden unless `ENABLE_ONE_RUPEE_DEMO=true` |
 | Pine Labs live credentials | Must be supplied by merchant |
 | AU Soundbox direct API | Not available from the physical soundbox alone |
 
@@ -42,7 +43,7 @@ For a customer booking from another phone/PC, recommended flow:
 7. Server booking reference, Pine order ID, INR currency and exact amount match karta hai.
 8. Valid `ORDER_PROCESSED` event ke baad hi payment `SUCCESS` aur booking `CONFIRMED` hoti hai.
 9. Duplicate webhook event unique event ID se ignore hota hai.
-10. Admin fallback reconciliation Pine Labs Get Order API se status re-check kar sakta hai.
+10. Customer status polling automatically Pine Labs Get Order API se re-check karta hai; staff action ki zarurat nahi hoti.
 
 Official references:
 
@@ -118,7 +119,7 @@ PK GAMING/
 ## Security model
 
 - Client cannot set final price.
-- Payment succeeds only after provider-signed server webhook or admin reconciliation.
+- Payment succeeds only after a provider-signed server webhook or automatic server-to-server order reconciliation.
 - Webhook uses raw request body.
 - HMAC comparison uses constant-time comparison.
 - Webhook timestamp tolerance blocks old replay attempts.
@@ -141,6 +142,7 @@ node -e "require('http').createServer((req,res)=>{const fs=require('fs');const p
 Open <http://localhost:4173>.
 
 With empty `config.js` API URL, frontend safe local-preview mode use karta hai. It does not pretend that a real payment was verified.
+It also does not save a fake local booking: the booking button stays disabled until a real HTTPS API URL is configured.
 
 ## Backend setup
 
@@ -178,6 +180,7 @@ Do not commit `.env`.
 | `PINE_LABS_WEBHOOK_SECRET` | Base64 webhook signing secret |
 | `PINE_LABS_WEBHOOK_TOLERANCE_SECONDS` | Replay window; default `300` |
 | `PINE_LABS_CALLBACK_URL` | Browser return URL after checkout |
+| `ENABLE_ONE_RUPEE_DEMO` | Shows the rate-limited ₹1 verification demo when set to `true` |
 
 ## Connect frontend to deployed API
 
@@ -230,12 +233,12 @@ Use UAT first.
 | `GET` | `/api/resources` | Active rigs |
 | `GET` | `/api/services` | Server-priced services |
 | `POST` | `/api/bookings` | Create booking and hosted checkout |
+| `POST` | `/api/demo-bookings` | Create a rate-limited ₹1 verification-only checkout |
 | `POST` | `/api/bookings/:id/payment-session` | Retry checkout with booking token |
 | `GET` | `/api/bookings/:id/payment-status` | Private customer status polling |
 | `POST` | `/api/payments/webhook/pine-labs` | Signed Pine Labs webhook |
-| `POST` | `/api/admin/bookings/:id/reconcile-payment` | Server-side status fallback |
 | `GET` | `/api/admin/bookings` | Admin booking list |
-| `PATCH` | `/api/admin/bookings/:id/status` | Admin booking status update |
+| `PATCH` | `/api/admin/bookings/:id/status` | Cancel unpaid or complete verified-paid bookings; cannot confirm payment |
 
 ## Production checklist
 
@@ -255,6 +258,12 @@ Use UAT first.
 - [ ] Pine Labs production onboarding/sign-off completed
 - [ ] Production credentials rotated and activated
 - [ ] Live low-value transaction reconciled in merchant dashboard
+
+After this one-time merchant/deployment setup, every payment check and booking confirmation is automatic. Customer support queries may stay on WhatsApp; payment screenshots and staff approval are not part of the flow.
+
+### ₹1 end-to-end verification
+
+Set `ENABLE_ONE_RUPEE_DEMO=true` only in the environment where you want the test button visible, seed the catalogue, and deploy the backend. The demo uses a hidden `DEMO-VERIFY-01` resource, does not reserve a gaming rig, and permits at most three attempts per IP per hour plus one attempt per mobile number every 30 minutes. After the customer pays ₹1 in Pine Labs checkout, the normal signed webhook or automatic Get Order reconciliation must change the `DEMO-*` booking from `PENDING` to `CONFIRMED`. Disable the flag after live verification if the public demo is no longer required.
 
 ## What must not be done
 

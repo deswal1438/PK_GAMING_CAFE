@@ -74,3 +74,24 @@ test("creates an idempotent hosted checkout order in minor currency units", asyn
   assert.equal((requests[1]?.body.order_amount as { value: number }).value, 29900);
   assert.equal(requests[1]?.body.merchant_order_reference, "PK-2026-ABC123");
 });
+
+test("creates the ₹1 verification demo as exactly 100 paise", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    if (url.endsWith("/api/auth/v1/token")) return new Response(JSON.stringify({ access_token: "token", expires_at: "2099-01-01T00:00:00Z" }), { status: 200 });
+    requests.push(body);
+    return new Response(JSON.stringify({ order_id: "order-demo-1", redirect_url: "https://checkout.example/order-demo-1" }), { status: 200 });
+  };
+
+  await provider(fetchImpl).createOrder({
+    bookingId: "DEMO-2026-ABC123",
+    amountInRupees: 1,
+    customerName: "Demo User",
+    customerPhone: "9876543210"
+  });
+
+  assert.equal((requests[0]?.order_amount as { value: number }).value, 100);
+  assert.equal(requests[0]?.merchant_order_reference, "DEMO-2026-ABC123");
+});

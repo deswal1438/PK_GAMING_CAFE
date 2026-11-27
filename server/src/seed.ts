@@ -7,14 +7,16 @@ const resources = [
   { code: "PS5-02", name: "PlayStation 5 · Rig 2", type: "PS5" },
   { code: "RACING-01", name: "Racing Simulator", type: "RACING" },
   { code: "PS5-VR-01", name: "PS5 + VR", type: "PS5_VR" },
-  { code: "META-VR-01", name: "Meta VR Cricket", type: "VR" }
+  { code: "META-VR-01", name: "Meta VR Cricket", type: "VR" },
+  { code: "DEMO-VERIFY-01", name: "₹1 Payment Verification Demo", type: "DEMO", active: false }
 ] as const;
 
 const services = [
   { slug: "ps5", name: "PlayStation 5", resourceType: "PS5", prices: { "30": 199, "60": 299 } },
   { slug: "racing", name: "Racing Simulator", resourceType: "RACING", prices: { "30": 299, "60": 499 } },
   { slug: "ps5vr", name: "PS5 + VR Experience", resourceType: "PS5_VR", prices: { "30": 299, "60": 499 } },
-  { slug: "meta", name: "Meta VR Cricket", resourceType: "VR", prices: { "30": 349, "60": 599 } }
+  { slug: "meta", name: "Meta VR Cricket", resourceType: "VR", prices: { "30": 349, "60": 599 } },
+  { slug: "payment-demo", name: "₹1 Automatic Payment Verification Demo", resourceType: "DEMO", prices: { "15": 1 }, active: false }
 ] as const;
 
 const uri = process.env.MONGODB_URI || "";
@@ -23,13 +25,13 @@ await mongoose.connect(uri);
 
 await Promise.all(resources.map((resource) => Resource.updateOne(
   { code: resource.code },
-  { $set: { ...resource, active: true } },
+  { $set: { ...resource, active: "active" in resource ? resource.active : true } },
   { upsert: true }
 )));
 
 await Promise.all(services.map((service) => Service.updateOne(
   { slug: service.slug },
-  { $set: { ...service, active: true } },
+  { $set: { ...service, active: "active" in service ? service.active : true } },
   { upsert: true }
 )));
 

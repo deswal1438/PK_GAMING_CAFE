@@ -12,6 +12,7 @@ import { PaymentProviderError, PineLabsOnlineProvider, type PaymentOrderStatus, 
 const app = express();
 const port = Number(process.env.PORT || 8787);
 const adminKey = process.env.ADMIN_API_KEY || "";
+const demoPaymentEnabled = (process.env.ENABLE_ONE_RUPEE_DEMO || "false").toLowerCase() === "true";
 
 const pineLabsConfigured = Boolean(
   process.env.PINE_LABS_CLIENT_ID &&
@@ -38,6 +39,13 @@ app.use(express.json({
   }
 }));
 app.use(rateLimit({ windowMs: 60_000, limit: 80, standardHeaders: true, legacyHeaders: false }));
+const demoPaymentLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "₹1 demo limit reached. Please try again later." }
+});
 
 function requireAdmin(request: express.Request, response: express.Response, next: express.NextFunction) {
   if (!adminKey || request.header("x-admin-key") !== adminKey) return response.status(401).json({ error: "Admin authentication required" });
@@ -58,7 +66,24 @@ function expectedMinorUnits(amountInRupees: number): number {
   return Math.round(amountInRupees * 100);
 }
 
+function indiaDateAndTime(now = new Date()): { date: string; startTime: string } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return { date: `${value("year")}-${value("month")}-${value("day")}`, startTime: `${value("hour")}:${value("minute")}` };
+}
+
 function validatePaymentAmount(booking: { amount: number; providerOrderId?: string | null }, event: PaymentOrderStatus | PaymentWebhookEvent) {
+  if (event.status === "SUCCESS" && (!event.providerOrderId || event.amountMinorUnits === undefined || !event.currency)) {
+    throw new PaymentProviderError("Successful payment response is missing order, amount or currency", 400);
+  }
   if (event.currency && event.currency !== "INR") throw new PaymentProviderError("Payment currency does not match booking", 400);
   if (event.amountMinorUnits !== undefined && event.amountMinorUnits !== expectedMinorUnits(booking.amount)) throw new PaymentProviderError("Payment amount does not match booking", 400);
   if (booking.providerOrderId && event.providerOrderId && booking.providerOrderId !== event.providerOrderId) throw new PaymentProviderError("Provider order does not match booking", 400);
@@ -80,8 +105,21 @@ async function applyPaymentStatus(booking: InstanceType<typeof BookingModel>, ev
   if (status === "SUCCESS") {
     booking.bookingStatus = "CONFIRMED";
     booking.paymentVerifiedAt = new Date();
+  } else if (status === "REFUNDED") {
+    booking.bookingStatus = "CANCELLED";
   }
   await booking.save();
+}
+
+async function reconcilePendingPayment(booking: InstanceType<typeof BookingModel>) {
+  if (!pineLabs || !booking.providerOrderId || !["PENDING", "FAILED"].includes(String(booking.paymentStatus))) return booking;
+  try {
+    const event = await pineLabs.getOrderStatus(booking.bookingId);
+    await applyPaymentStatus(booking, event);
+  } catch (error) {
+    console.error("Automatic Pine Labs reconciliation failed", booking.bookingId, error instanceof Error ? error.message : error);
+  }
+  return booking;
 }
 
 async function createPaymentSession(booking: InstanceType<typeof BookingModel>) {
@@ -114,11 +152,69 @@ function publicPaymentState(booking: InstanceType<typeof BookingModel>) {
 app.get("/api/health", (_request, response) => response.json({
   ok: true,
   service: "pk-gaming-cafe-api",
-  payments: { provider: "PINE_LABS_ONLINE", configured: pineLabsConfigured }
+  payments: { provider: "PINE_LABS_ONLINE", configured: pineLabsConfigured },
+  oneRupeeDemoEnabled: demoPaymentEnabled && pineLabsConfigured
 }));
 
 app.get("/api/resources", async (_request, response) => response.json(await Resource.find({ active: true }).sort({ code: 1 }).lean()));
 app.get("/api/services", async (_request, response) => response.json(await Service.find({ active: true }).sort({ name: 1 }).lean()));
+
+app.post("/api/demo-bookings", demoPaymentLimiter, async (request, response) => {
+  if (!demoPaymentEnabled) return response.status(404).json({ error: "₹1 payment demo is not enabled" });
+  if (!pineLabs) return response.status(503).json({ error: "Secure online payment is not configured" });
+  const body = request.body as Record<string, unknown>;
+  const customerName = String(body.customerName || "").trim();
+  const phone = String(body.phone || "").replace(/\D/g, "").slice(-10);
+  if (customerName.length < 2 || phone.length !== 10) return response.status(400).json({ error: "Valid name and 10-digit mobile number are required" });
+
+  const [resource, service] = await Promise.all([
+    Resource.findOne({ code: "DEMO-VERIFY-01", type: "DEMO" }),
+    Service.findOne({ slug: "payment-demo", resourceType: "DEMO" })
+  ]);
+  if (!resource || !service) return response.status(503).json({ error: "₹1 demo catalogue is not seeded" });
+  const recentDemo = await BookingModel.exists({
+    phone,
+    serviceId: service._id,
+    createdAt: { $gte: new Date(Date.now() - 30 * 60_000) }
+  });
+  if (recentDemo) return response.status(429).json({ error: "Only one ₹1 demo is allowed per mobile number every 30 minutes" });
+
+  const { date, startTime } = indiaDateAndTime();
+  const bookingId = `DEMO-${new Date().getFullYear()}-${randomUUID().slice(0, 6).toUpperCase()}`;
+  const statusToken = randomBytes(32).toString("base64url");
+  const booking = await BookingModel.create({
+    bookingId,
+    customerName,
+    phone,
+    resourceId: resource._id,
+    serviceId: service._id,
+    date,
+    startTime,
+    endTime: calculateEndTime(startTime, 15),
+    duration: 15,
+    amount: 1,
+    bookingStatus: "PENDING",
+    paymentStatus: "PENDING",
+    statusTokenHash: statusTokenHash(statusToken),
+    notes: "₹1 automatic payment verification demo; not a gaming slot"
+  });
+
+  try {
+    const payment = await createPaymentSession(booking);
+    if (!payment) throw new PaymentProviderError("Secure payment checkout is unavailable", 503);
+    return response.status(201).json({
+      ...publicPaymentState(booking),
+      amount: 1,
+      statusToken,
+      demo: true,
+      payment: { available: true, checkoutUrl: payment.checkoutUrl }
+    });
+  } catch (error) {
+    await BookingModel.deleteOne({ _id: booking._id, paymentStatus: { $ne: "SUCCESS" } });
+    const statusCode = error instanceof PaymentProviderError ? error.statusCode : 502;
+    return response.status(statusCode).json({ error: "₹1 secure demo checkout is temporarily unavailable; no demo booking was created" });
+  }
+});
 
 app.post("/api/bookings", async (request, response) => {
   const body = request.body as Record<string, unknown>;
@@ -133,6 +229,7 @@ app.post("/api/bookings", async (request, response) => {
   const serviceId = String(body.serviceId || "");
   const serviceSlug = String(body.serviceSlug || "");
   if (customerName.length < 2 || phone.length !== 10 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime) || duration < 15 || (!resourceId && !resourceCode) || (!serviceId && !serviceSlug)) return response.status(400).json({ error: "Invalid booking details" });
+  if (!pineLabs) return response.status(503).json({ error: "Secure online payment is not configured" });
 
   const resourceQuery = resourceId && mongoose.isValidObjectId(resourceId) ? { _id: resourceId, active: true } : { code: resourceCode || resourceId, active: true };
   const serviceQuery = serviceId && mongoose.isValidObjectId(serviceId) ? { _id: serviceId, active: true } : { slug: serviceSlug || serviceId, active: true };
@@ -145,8 +242,10 @@ app.post("/api/bookings", async (request, response) => {
   if (typeof amount !== "number") return response.status(400).json({ error: "Duration is not available for this service" });
 
   const endTime = calculateEndTime(startTime, duration);
-  const existing = await BookingModel.find({ resourceId: resource._id, date, bookingStatus: { $ne: "CANCELLED" } }).lean();
-  if (existing.some((booking) => overlaps(startTime, endTime, booking.startTime, booking.endTime))) return response.status(409).json({ error: "That resource is already booked for this time" });
+  const existing = await BookingModel.find({ resourceId: resource._id, date, bookingStatus: { $in: ["PENDING", "CONFIRMED"] } });
+  await Promise.all(existing.map((booking) => reconcilePendingPayment(booking)));
+  const activeBookings = existing.filter((booking) => booking.bookingStatus === "CONFIRMED" || (booking.bookingStatus === "PENDING" && booking.paymentStatus === "PENDING"));
+  if (activeBookings.some((booking) => overlaps(startTime, endTime, booking.startTime, booking.endTime))) return response.status(409).json({ error: "That resource is already booked or has a payment in progress" });
 
   const bookingId = `PK-${new Date().getFullYear()}-${randomUUID().slice(0, 6).toUpperCase()}`;
   const statusToken = randomBytes(32).toString("base64url");
@@ -172,7 +271,9 @@ app.post("/api/bookings", async (request, response) => {
     return response.status(201).json({ ...publicPaymentState(booking), amount: booking.amount, statusToken, payment: payment ? { available: true, checkoutUrl: payment.checkoutUrl } : { available: false } });
   } catch (error) {
     console.error("Pine Labs checkout creation failed", error instanceof Error ? error.message : error);
-    return response.status(201).json({ ...publicPaymentState(booking), amount: booking.amount, statusToken, payment: { available: false, error: "Payment checkout is temporarily unavailable" } });
+    await BookingModel.deleteOne({ _id: booking._id, paymentStatus: { $ne: "SUCCESS" }, providerOrderId: { $exists: false } });
+    const statusCode = error instanceof PaymentProviderError ? error.statusCode : 502;
+    return response.status(statusCode).json({ error: "Secure payment checkout is temporarily unavailable; no booking was confirmed" });
   }
 });
 
@@ -195,6 +296,7 @@ app.get("/api/bookings/:bookingId/payment-status", async (request, response) => 
   const booking = await BookingModel.findOne({ bookingId: request.params.bookingId }).select("+statusTokenHash");
   const token = request.header("x-booking-token") || "";
   if (!booking || !token || !tokenMatches(token, booking.statusTokenHash)) return response.status(404).json({ error: "Booking not found" });
+  await reconcilePendingPayment(booking);
   return response.json(publicPaymentState(booking));
 });
 
@@ -211,6 +313,10 @@ app.post("/api/payments/webhook/pine-labs", async (request, response) => {
     if (!booking) return response.status(404).json({ error: "Booking not found" });
     validatePaymentAmount(booking, event);
 
+    if (await PaymentEvent.exists({ provider: "PINE_LABS_ONLINE", eventId: event.eventId })) return response.json({ received: true, duplicate: true });
+
+    await applyPaymentStatus(booking, event);
+
     try {
       await PaymentEvent.create({
         provider: "PINE_LABS_ONLINE",
@@ -224,8 +330,6 @@ app.post("/api/payments/webhook/pine-labs", async (request, response) => {
       if (error && typeof error === "object" && "code" in error && error.code === 11000) return response.json({ received: true, duplicate: true });
       throw error;
     }
-
-    await applyPaymentStatus(booking, event);
     return response.json({ received: true });
   } catch (error) {
     const statusCode = error instanceof PaymentProviderError ? error.statusCode : 400;
@@ -233,22 +337,19 @@ app.post("/api/payments/webhook/pine-labs", async (request, response) => {
   }
 });
 
-app.post("/api/admin/bookings/:bookingId/reconcile-payment", requireAdmin, async (request, response) => {
-  if (!pineLabs) return response.status(503).json({ error: "Pine Labs is not configured" });
+app.get("/api/admin/bookings", requireAdmin, async (_request, response) => response.json(await BookingModel.find().populate("resourceId serviceId").sort({ date: 1, startTime: 1 }).lean()));
+app.patch("/api/admin/bookings/:bookingId/status", requireAdmin, async (request, response) => {
+  const status = String(request.body.status || "");
+  if (!["CANCELLED", "COMPLETED"].includes(status)) return response.status(400).json({ error: "Payment confirmation is automatic; admin can only cancel or complete a booking" });
   const booking = await BookingModel.findOne({ bookingId: request.params.bookingId });
   if (!booking) return response.status(404).json({ error: "Booking not found" });
-  try {
-    const event = await pineLabs.getOrderStatus(booking.bookingId);
-    await applyPaymentStatus(booking, event);
-    return response.json(publicPaymentState(booking));
-  } catch (error) {
-    const statusCode = error instanceof PaymentProviderError ? error.statusCode : 502;
-    return response.status(statusCode).json({ error: error instanceof Error ? error.message : "Payment reconciliation failed" });
-  }
+  if (status === "COMPLETED" && booking.paymentStatus !== "SUCCESS") return response.status(409).json({ error: "Only an automatically verified paid booking can be completed" });
+  if (status === "CANCELLED" && booking.paymentStatus === "SUCCESS") return response.status(409).json({ error: "A paid booking must be refunded through Pine Labs; refund webhook will cancel it automatically" });
+  booking.bookingStatus = status === "CANCELLED" ? "CANCELLED" : "COMPLETED";
+  await booking.save();
+  return response.json(booking);
 });
 
-app.get("/api/admin/bookings", requireAdmin, async (_request, response) => response.json(await BookingModel.find().populate("resourceId serviceId").sort({ date: 1, startTime: 1 }).lean()));
-app.patch("/api/admin/bookings/:bookingId/status", requireAdmin, async (request, response) => response.json(await BookingModel.findOneAndUpdate({ bookingId: request.params.bookingId }, { $set: { bookingStatus: request.body.status } }, { new: true }).lean()));
-
-await mongoose.connect(process.env.MONGODB_URI || "");
+if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is required");
+await mongoose.connect(process.env.MONGODB_URI);
 app.listen(port, () => console.log(`PK Gaming Cafe API listening on ${port}`));
