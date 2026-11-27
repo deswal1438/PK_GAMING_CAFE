@@ -27,7 +27,8 @@ const pineLabs = pineLabsConfigured ? new PineLabsOnlineProvider({
   clientSecret: process.env.PINE_LABS_CLIENT_SECRET || "",
   webhookSecret: process.env.PINE_LABS_WEBHOOK_SECRET || "",
   callbackUrl: process.env.PINE_LABS_CALLBACK_URL || "",
-  webhookToleranceSeconds: Number(process.env.PINE_LABS_WEBHOOK_TOLERANCE_SECONDS || 300)
+  webhookToleranceSeconds: Number(process.env.PINE_LABS_WEBHOOK_TOLERANCE_SECONDS || 300),
+  qrTtlSeconds: Number(process.env.PINE_LABS_QR_TTL_SECONDS || 600)
 }) : null;
 
 app.use(helmet());
@@ -138,6 +139,16 @@ async function createPaymentSession(booking: InstanceType<typeof BookingModel>) 
   return order;
 }
 
+function publicQrSession(payment: Awaited<ReturnType<PineLabsOnlineProvider["createOrder"]>>) {
+  return {
+    available: true,
+    mode: "UPI_QR",
+    qrImageUrl: payment.qrImageUrl,
+    upiIntentUrl: payment.upiIntentUrl || null,
+    expiresAt: payment.expiresAt
+  };
+}
+
 function publicPaymentState(booking: InstanceType<typeof BookingModel>) {
   return {
     bookingId: booking.bookingId,
@@ -152,7 +163,7 @@ function publicPaymentState(booking: InstanceType<typeof BookingModel>) {
 app.get("/api/health", (_request, response) => response.json({
   ok: true,
   service: "pk-gaming-cafe-api",
-  payments: { provider: "PINE_LABS_ONLINE", configured: pineLabsConfigured },
+  payments: { provider: "PINE_LABS_ONLINE", mode: "UPI_QR", configured: pineLabsConfigured },
   oneRupeeDemoEnabled: demoPaymentEnabled && pineLabsConfigured
 }));
 
@@ -201,18 +212,18 @@ app.post("/api/demo-bookings", demoPaymentLimiter, async (request, response) => 
 
   try {
     const payment = await createPaymentSession(booking);
-    if (!payment) throw new PaymentProviderError("Secure payment checkout is unavailable", 503);
+    if (!payment) throw new PaymentProviderError("Secure UPI QR is unavailable", 503);
     return response.status(201).json({
       ...publicPaymentState(booking),
       amount: 1,
       statusToken,
       demo: true,
-      payment: { available: true, checkoutUrl: payment.checkoutUrl }
+      payment: publicQrSession(payment)
     });
   } catch (error) {
     await BookingModel.deleteOne({ _id: booking._id, paymentStatus: { $ne: "SUCCESS" } });
     const statusCode = error instanceof PaymentProviderError ? error.statusCode : 502;
-    return response.status(statusCode).json({ error: "₹1 secure demo checkout is temporarily unavailable; no demo booking was created" });
+    return response.status(statusCode).json({ error: "₹1 secure QR is temporarily unavailable; no demo booking was created" });
   }
 });
 
@@ -268,12 +279,12 @@ app.post("/api/bookings", async (request, response) => {
 
   try {
     const payment = await createPaymentSession(booking);
-    return response.status(201).json({ ...publicPaymentState(booking), amount: booking.amount, statusToken, payment: payment ? { available: true, checkoutUrl: payment.checkoutUrl } : { available: false } });
+    return response.status(201).json({ ...publicPaymentState(booking), amount: booking.amount, statusToken, payment: payment ? publicQrSession(payment) : { available: false } });
   } catch (error) {
-    console.error("Pine Labs checkout creation failed", error instanceof Error ? error.message : error);
+    console.error("Pine Labs UPI QR creation failed", error instanceof Error ? error.message : error);
     await BookingModel.deleteOne({ _id: booking._id, paymentStatus: { $ne: "SUCCESS" }, providerOrderId: { $exists: false } });
     const statusCode = error instanceof PaymentProviderError ? error.statusCode : 502;
-    return response.status(statusCode).json({ error: "Secure payment checkout is temporarily unavailable; no booking was confirmed" });
+    return response.status(statusCode).json({ error: "Secure UPI QR is temporarily unavailable; no booking was confirmed" });
   }
 });
 
@@ -285,10 +296,10 @@ app.post("/api/bookings/:bookingId/payment-session", async (request, response) =
   if (!pineLabs) return response.status(503).json({ error: "Online payments are not configured" });
   try {
     const payment = await createPaymentSession(booking);
-    return response.json({ ...publicPaymentState(booking), checkoutUrl: payment?.checkoutUrl });
+    return response.json({ ...publicPaymentState(booking), payment: payment ? publicQrSession(payment) : { available: false } });
   } catch (error) {
     const statusCode = error instanceof PaymentProviderError ? error.statusCode : 502;
-    return response.status(statusCode).json({ error: error instanceof Error ? error.message : "Payment checkout failed" });
+    return response.status(statusCode).json({ error: error instanceof Error ? error.message : "UPI QR generation failed" });
   }
 });
 

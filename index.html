@@ -74,7 +74,7 @@
               </div>
               <span class="status-pill">SECURE PAYMENT</span>
             </div>
-            <p class="muted">Choose your setup, pay through secure Pine Labs checkout and receive automatic confirmation. No screenshot or staff approval is accepted.</p>
+            <p class="muted">Choose your setup, scan the timed Pine Labs UPI QR and receive automatic confirmation. No upload, screenshot or staff approval is required.</p>
             <form id="booking-form" novalidate>
               <div class="form-grid two-col">
                 <label>Gaming setup
@@ -117,6 +117,16 @@
               <button class="button button-ghost button-full demo-payment-button" id="demo-payment-button" type="button" hidden>VERIFY WITH ₹1 DEMO</button>
               <p class="form-note" id="form-note" role="status">Payment is verified automatically. WhatsApp is only for questions.</p>
             </form>
+            <section class="payment-qr-panel" id="payment-qr-panel" aria-live="polite" hidden>
+              <span class="kicker">SECURE UPI PAYMENT</span>
+              <h3 id="payment-qr-title">Scan to pay</h3>
+              <div class="payment-qr-frame"><img id="payment-qr-image" alt="Dynamic Pine Labs UPI payment QR code" referrerpolicy="no-referrer" /></div>
+              <div class="payment-qr-timer"><span>QR valid for</span><strong id="payment-qr-countdown">10:00</strong></div>
+              <a class="button button-orange button-full" id="payment-upi-intent" href="#">OPEN UPI APP</a>
+              <button class="button button-ghost button-full" id="payment-qr-retry" type="button" hidden>GENERATE NEW QR</button>
+              <p class="form-note payment-qr-status" id="payment-qr-status">Waiting for payment confirmation…</p>
+              <small>No screenshot or UTR upload is required. Confirmation happens automatically.</small>
+            </section>
           </div>
           <div class="hero-atmosphere" aria-hidden="true"><img src="assets/all-access.jpeg" alt="" /><span><b>5 HOURS</b><small>ALL ACCESS PASS</small></span></div>
         </section>
@@ -178,7 +188,7 @@
           <div class="section-intro"><div><span class="kicker">GOOD TO KNOW</span><h2>Everything before game time</h2></div><p>Clear answers for first-timers, squads and parents planning a party.</p></div>
           <div class="faq-grid">
             <details open><summary>Can I book one specific machine?</summary><p>Yes. Choose a service, a preferred rig and an exact time. Each resource is scheduled independently, so another setup can still be booked.</p></details>
-            <details><summary>How is my payment verified?</summary><p>The production flow uses Pine Labs hosted checkout. A signed server-to-server webhook confirms the exact booking reference and amount before your slot changes to CONFIRMED.</p></details>
+            <details><summary>How is my payment verified?</summary><p>The website creates a unique Pine Labs UPI QR for your booking. A signed server-to-server webhook confirms the exact reference and amount before your slot changes to CONFIRMED.</p></details>
             <details><summary>Can we switch between experiences?</summary><p>The 5-hour All Access Pass is made for switching between available PS5, VR and racing setups during one visit.</p></details>
             <details><summary>How do birthday parties work?</summary><p>Choose a 1, 2 or 3-hour private-cafe package. We’ll confirm the date, members, meal and decoration details on WhatsApp.</p></details>
           </div>

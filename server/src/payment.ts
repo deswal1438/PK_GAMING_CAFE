@@ -5,7 +5,9 @@ export type PaymentStatus = "PENDING" | "SUCCESS" | "FAILED" | "REFUNDED";
 export type PaymentOrder = {
   provider: "PINE_LABS_ONLINE";
   providerOrderId: string;
-  checkoutUrl: string;
+  qrImageUrl: string;
+  upiIntentUrl?: string;
+  expiresAt: string;
 };
 
 export type PaymentWebhookEvent = {
@@ -41,6 +43,7 @@ type PineLabsConfig = {
   webhookSecret: string;
   callbackUrl: string;
   webhookToleranceSeconds?: number;
+  qrTtlSeconds?: number;
 };
 
 type PineLabsOrder = {
@@ -49,6 +52,7 @@ type PineLabsOrder = {
   status?: string;
   redirect_url?: string;
   challenge_url?: string;
+  image_url?: string;
   order_amount?: { value?: number; currency?: string };
   payments?: Array<{
     id?: string;
@@ -128,12 +132,38 @@ function paymentReference(order: PineLabsOrder): string | undefined {
   return payment?.acquirer_data?.rrn || payment?.acquirer_data?.acquirer_reference || payment?.merchant_payment_reference || payment?.id;
 }
 
+function qrExpiry(imageUrl: string, ttlSeconds: number): string {
+  const fallback = Date.now() + ttlSeconds * 1000;
+  try {
+    const url = new URL(imageUrl);
+    const rawDate = url.searchParams.get("X-Amz-Date");
+    const rawSeconds = Number(url.searchParams.get("X-Amz-Expires"));
+    if (!rawDate || !Number.isFinite(rawSeconds) || rawSeconds <= 0 || !/^\d{8}T\d{6}Z$/.test(rawDate)) {
+      return new Date(fallback).toISOString();
+    }
+    const signedAt = Date.UTC(
+      Number(rawDate.slice(0, 4)),
+      Number(rawDate.slice(4, 6)) - 1,
+      Number(rawDate.slice(6, 8)),
+      Number(rawDate.slice(9, 11)),
+      Number(rawDate.slice(11, 13)),
+      Number(rawDate.slice(13, 15))
+    );
+    const signedExpiry = signedAt + rawSeconds * 1000;
+    return new Date(Math.min(fallback, signedExpiry)).toISOString();
+  } catch {
+    return new Date(fallback).toISOString();
+  }
+}
+
 export class PineLabsOnlineProvider {
   private accessToken?: { value: string; expiresAt: number };
   private readonly toleranceSeconds: number;
+  private readonly qrTtlSeconds: number;
 
   constructor(private readonly config: PineLabsConfig, private readonly fetchImpl: FetchLike = fetch) {
     this.toleranceSeconds = config.webhookToleranceSeconds ?? 300;
+    this.qrTtlSeconds = Math.min(Math.max(config.qrTtlSeconds ?? 600, 60), 1200);
   }
 
   private async request(path: string, init: RequestInit, authenticated = true): Promise<unknown> {
@@ -170,7 +200,11 @@ export class PineLabsOnlineProvider {
     const token = String(payload.access_token || "");
     if (!token) throw new PaymentProviderError("Pine Labs token response did not contain access_token");
     const parsedExpiry = Date.parse(String(payload.expires_at || ""));
-    this.accessToken = { value: token, expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : Date.now() + 5 * 60_000 };
+    const expiresInSeconds = Number(payload.expires_in);
+    const expiresAt = Number.isFinite(parsedExpiry)
+      ? parsedExpiry
+      : Date.now() + (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds * 1000 : 5 * 60_000);
+    this.accessToken = { value: token, expiresAt };
     return token;
   }
 
@@ -187,22 +221,45 @@ export class PineLabsOnlineProvider {
     };
     if (input.customerEmail) customer.email_id = input.customerEmail;
 
-    const order = parseOrder(await this.request("/api/checkout/v1/orders", {
+    const amountMinorUnits = toMinorUnits(input.amountInRupees);
+    const order = parseOrder(await this.request("/api/pay/v1/orders", {
       method: "POST",
       body: JSON.stringify({
         merchant_order_reference: input.bookingId,
-        order_amount: { value: toMinorUnits(input.amountInRupees), currency: "INR" },
-        integration_mode: "REDIRECT",
-        allowed_payment_methods: ["UPI", "CARD"],
+        order_amount: { value: amountMinorUnits, currency: "INR" },
+        pre_auth: false,
+        integration_mode: "SEAMLESS",
+        allowed_payment_methods: ["UPI"],
         notes: `PK Gaming booking ${input.bookingId}`.slice(0, 100),
         callback_url: callback.toString(),
+        failure_callback_url: callback.toString(),
         purchase_details: { customer }
       })
     }));
     const providerOrderId = String(order.order_id || "");
-    const checkoutUrl = String(order.redirect_url || order.challenge_url || "");
-    if (!providerOrderId || !checkoutUrl) throw new PaymentProviderError("Pine Labs checkout response was incomplete");
-    return { provider: "PINE_LABS_ONLINE", providerOrderId, checkoutUrl };
+    if (!providerOrderId) throw new PaymentProviderError("Pine Labs order response was incomplete");
+
+    const payment = parseOrder(await this.request(`/api/pay/v1/orders/${encodeURIComponent(providerOrderId)}/payments`, {
+      method: "POST",
+      body: JSON.stringify({
+        payments: [{
+          merchant_payment_reference: `${input.bookingId}-${randomUUID().slice(0, 8)}`.slice(0, 50),
+          payment_method: "UPI",
+          payment_amount: { value: amountMinorUnits, currency: "INR" },
+          payment_option: { upi_details: { txn_mode: "INTENT", upi_qr: true } }
+        }]
+      })
+    }));
+    const qrImageUrl = String(payment.image_url || "");
+    const upiIntentUrl = String(payment.challenge_url || "");
+    if (!qrImageUrl) throw new PaymentProviderError("Pine Labs did not return a UPI QR image");
+    return {
+      provider: "PINE_LABS_ONLINE",
+      providerOrderId,
+      qrImageUrl,
+      upiIntentUrl: upiIntentUrl || undefined,
+      expiresAt: qrExpiry(qrImageUrl, this.qrTtlSeconds)
+    };
   }
 
   async getOrderStatus(bookingId: string): Promise<PaymentOrderStatus> {

@@ -2,11 +2,11 @@
 
 Public booking-first website and payment-ready backend for **PK Gaming Cafe, Faridabad**.
 
-- Live website: <https://pk-gaming-cafe.oakislet64.chatgpt.site>
+- Live website: <https://pk-gaming-cafe-auto.yummyherb4.chatgpt.site>
 - Public source: <https://github.com/deswal1438/PK_GAMING_CAFE>
 - Frontend: static HTML, CSS and JavaScript
 - Backend: Node.js, Express, TypeScript, MongoDB and Mongoose
-- Recommended online payment provider: Pine Labs Online hosted checkout
+- Recommended online payment provider: Pine Labs Online dynamic UPI QR
 - Payment confirmation: signed webhook plus server-side order reconciliation
 
 > Important: repository public hai, lekin payment secrets public nahi hain. Live auto-payment tabhi start hoga jab backend deploy karke Pine Labs UAT/production credentials environment variables mein set kiye jayenge aur `config.js` mein public API URL add hoga.
@@ -19,7 +19,7 @@ Public booking-first website and payment-ready backend for **PK Gaming Cafe, Far
 | Booking UI | Ready |
 | Local preview booking | Disabled (fake/local bookings are not accepted) |
 | MongoDB booking API | Ready for deployment |
-| Pine Labs hosted checkout adapter | Implemented |
+| Pine Labs dynamic UPI QR adapter | Implemented |
 | Signed webhook verification | Implemented |
 | Duplicate webhook protection | Implemented |
 | Amount/order validation | Implemented |
@@ -36,19 +36,20 @@ For a customer booking from another phone/PC, recommended flow:
 
 1. Customer selects rig, date and duration.
 2. Backend calculates the final amount from MongoDB; browser amount trusted nahi hota.
-3. Backend Pine Labs hosted checkout order creates.
-4. Customer Pine Labs checkout par UPI/card se payment karta hai.
-5. Pine Labs backend webhook sends.
-6. Server verifies `webhook-id`, `webhook-timestamp` and `webhook-signature` using HMAC-SHA256.
-7. Server booking reference, Pine order ID, INR currency and exact amount match karta hai.
-8. Valid `ORDER_PROCESSED` event ke baad hi payment `SUCCESS` aur booking `CONFIRMED` hoti hai.
-9. Duplicate webhook event unique event ID se ignore hota hai.
-10. Customer status polling automatically Pine Labs Get Order API se re-check karta hai; staff action ki zarurat nahi hoti.
+3. Backend Pine Labs order and UPI QR payment creates.
+4. Website timed dynamic QR shows; mobile users can open the UPI intent directly.
+5. Customer scans and authorizes payment in a UPI app.
+6. Pine Labs backend webhook sends.
+7. Server verifies `webhook-id`, `webhook-timestamp` and `webhook-signature` using HMAC-SHA256.
+8. Server booking reference, Pine order ID, INR currency and exact amount match karta hai.
+9. Valid `ORDER_PROCESSED` event ke baad hi payment `SUCCESS` aur booking `CONFIRMED` hoti hai.
+10. Duplicate webhook event unique event ID se ignore hota hai.
+11. Customer status polling automatically Pine Labs Get Order API se re-check karta hai; staff action ki zarurat nahi hoti.
 
 Official references:
 
 - Pine Labs Online docs: <https://www.pinelabs.com/docs/online-payments>
-- Hosted checkout API: <https://www.pinelabs.com/docs/online-payments/api/checkout/generate-checkout-link>
+- UPI QR integration: <https://www.pinelabs.com/docs/online-payments/use-cases/accept-payments-upi>
 - Webhook signature verification: <https://www.pinelabs.com/docs/online-payments/developer-tools/webhooks/signature-verification>
 - Webhook events: <https://www.pinelabs.com/docs/online-payments/developer-tools/webhooks/available-events>
 - In-store cloud integration: <https://developer.pinelabs.com/in/instore/cloud-integration>
@@ -88,7 +89,7 @@ Is flow ke liye Pine Labs integration team se these values/onboarding chahiye:
 - UAT device/configuration
 - UAT sign-off before production
 
-Current code remote web booking ke liye Pine Labs **Online hosted checkout** implement karta hai. In-store Plutus flow docs mein explained hai but production credentials ke bina live machine integration claim nahi kiya gaya.
+Current code remote web booking ke liye Pine Labs **Online dynamic UPI QR** implement karta hai. A910S/POS Controller is remote website flow ka part nahi hai.
 
 ## Project structure
 
@@ -109,8 +110,8 @@ PK GAMING/
     ├── tsconfig.json
     └── src/
         ├── index.ts           API routes and payment state transitions
-        ├── payment.ts         Pine Labs OAuth, checkout, webhook and status adapter
-        ├── payment.test.ts    Signature and checkout tests
+        ├── payment.ts         Pine Labs OAuth, UPI QR, webhook and status adapter
+        ├── payment.test.ts    Signature and UPI QR tests
         ├── models.ts          MongoDB models and webhook idempotency model
         ├── booking.ts         Time calculations and overlap protection
         └── seed.ts            Default rigs, services and prices
@@ -179,7 +180,8 @@ Do not commit `.env`.
 | `PINE_LABS_CLIENT_SECRET` | Pine Labs Online OAuth client secret |
 | `PINE_LABS_WEBHOOK_SECRET` | Base64 webhook signing secret |
 | `PINE_LABS_WEBHOOK_TOLERANCE_SECONDS` | Replay window; default `300` |
-| `PINE_LABS_CALLBACK_URL` | Browser return URL after checkout |
+| `PINE_LABS_CALLBACK_URL` | Success/failure return URL registered for the order |
+| `PINE_LABS_QR_TTL_SECONDS` | Website countdown; clamped to 60–1200 seconds, default `600` |
 | `ENABLE_ONE_RUPEE_DEMO` | Shows the rate-limited ₹1 verification demo when set to `true` |
 
 ## Connect frontend to deployed API
@@ -220,7 +222,7 @@ Use UAT first.
    - `ORDER_CANCELLED`
    - `REFUND_PROCESSED`
 
-5. Use UAT checkout and verify that the booking changes from `PENDING` to `CONFIRMED` only after a signed success webhook.
+5. Use a ₹1 UPI QR and verify that the booking changes from `PENDING` to `CONFIRMED` only after a signed success webhook. Pine Labs states that UPI can process real transactions even in UAT, so use the minimum amount.
 6. Run negative tests: wrong signature, wrong amount, old timestamp, duplicate event, cancelled order.
 7. Request Pine Labs UAT sign-off/production credentials.
 8. Change to the exact production base URL supplied by Pine Labs and rotate all test credentials.
@@ -232,9 +234,9 @@ Use UAT first.
 | `GET` | `/api/health` | Service/payment configuration health |
 | `GET` | `/api/resources` | Active rigs |
 | `GET` | `/api/services` | Server-priced services |
-| `POST` | `/api/bookings` | Create booking and hosted checkout |
-| `POST` | `/api/demo-bookings` | Create a rate-limited ₹1 verification-only checkout |
-| `POST` | `/api/bookings/:id/payment-session` | Retry checkout with booking token |
+| `POST` | `/api/bookings` | Create booking and dynamic UPI QR |
+| `POST` | `/api/demo-bookings` | Create a rate-limited ₹1 verification QR |
+| `POST` | `/api/bookings/:id/payment-session` | Generate a fresh QR with booking token |
 | `GET` | `/api/bookings/:id/payment-status` | Private customer status polling |
 | `POST` | `/api/payments/webhook/pine-labs` | Signed Pine Labs webhook |
 | `GET` | `/api/admin/bookings` | Admin booking list |
@@ -263,7 +265,7 @@ After this one-time merchant/deployment setup, every payment check and booking c
 
 ### ₹1 end-to-end verification
 
-Set `ENABLE_ONE_RUPEE_DEMO=true` only in the environment where you want the test button visible, seed the catalogue, and deploy the backend. The demo uses a hidden `DEMO-VERIFY-01` resource, does not reserve a gaming rig, and permits at most three attempts per IP per hour plus one attempt per mobile number every 30 minutes. After the customer pays ₹1 in Pine Labs checkout, the normal signed webhook or automatic Get Order reconciliation must change the `DEMO-*` booking from `PENDING` to `CONFIRMED`. Disable the flag after live verification if the public demo is no longer required.
+Set `ENABLE_ONE_RUPEE_DEMO=true` only in the environment where you want the test button visible, seed the catalogue, and deploy the backend. The demo uses a hidden `DEMO-VERIFY-01` resource, does not reserve a gaming rig, and permits at most three attempts per IP per hour plus one attempt per mobile number every 30 minutes. After the customer scans and pays the ₹1 QR, the normal signed webhook or automatic Get Order reconciliation must change the `DEMO-*` booking from `PENDING` to `CONFIRMED`. Disable the flag after live verification if the public demo is no longer required.
 
 ## What must not be done
 

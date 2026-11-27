@@ -51,14 +51,19 @@ test("rejects stale Pine Labs webhooks", () => {
   );
 });
 
-test("creates an idempotent hosted checkout order in minor currency units", async () => {
+test("creates an idempotent order and a dynamic UPI QR in minor currency units", async () => {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
     requests.push({ url, body });
     if (url.endsWith("/api/auth/v1/token")) return new Response(JSON.stringify({ access_token: "token", expires_at: "2099-01-01T00:00:00Z" }), { status: 200 });
-    return new Response(JSON.stringify({ order_id: "order-299", redirect_url: "https://checkout.example/order-299" }), { status: 200 });
+    if (url.endsWith("/api/pay/v1/orders")) return new Response(JSON.stringify({ data: { order_id: "order-299" } }), { status: 200 });
+    return new Response(JSON.stringify({ data: {
+      order_id: "order-299",
+      image_url: "https://qr.example/order-299.png",
+      challenge_url: "upi://pay?pa=pk@example&am=299.00"
+    } }), { status: 200 });
   };
 
   const order = await provider(fetchImpl).createOrder({
@@ -70,9 +75,14 @@ test("creates an idempotent hosted checkout order in minor currency units", asyn
   });
 
   assert.equal(order.providerOrderId, "order-299");
-  assert.equal(order.checkoutUrl, "https://checkout.example/order-299");
+  assert.equal(order.qrImageUrl, "https://qr.example/order-299.png");
+  assert.equal(order.upiIntentUrl, "upi://pay?pa=pk@example&am=299.00");
   assert.equal((requests[1]?.body.order_amount as { value: number }).value, 29900);
   assert.equal(requests[1]?.body.merchant_order_reference, "PK-2026-ABC123");
+  const payments = requests[2]?.body.payments as Array<Record<string, unknown>>;
+  assert.equal((payments[0]?.payment_amount as { value: number }).value, 29900);
+  assert.equal(payments[0]?.payment_method, "UPI");
+  assert.deepEqual(payments[0]?.payment_option, { upi_details: { txn_mode: "INTENT", upi_qr: true } });
 });
 
 test("creates the ₹1 verification demo as exactly 100 paise", async () => {
@@ -82,7 +92,12 @@ test("creates the ₹1 verification demo as exactly 100 paise", async () => {
     const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
     if (url.endsWith("/api/auth/v1/token")) return new Response(JSON.stringify({ access_token: "token", expires_at: "2099-01-01T00:00:00Z" }), { status: 200 });
     requests.push(body);
-    return new Response(JSON.stringify({ order_id: "order-demo-1", redirect_url: "https://checkout.example/order-demo-1" }), { status: 200 });
+    if (url.endsWith("/api/pay/v1/orders")) return new Response(JSON.stringify({ data: { order_id: "order-demo-1" } }), { status: 200 });
+    return new Response(JSON.stringify({ data: {
+      order_id: "order-demo-1",
+      image_url: "https://qr.example/order-demo-1.png",
+      challenge_url: "upi://pay?pa=pk@example&am=1.00"
+    } }), { status: 200 });
   };
 
   await provider(fetchImpl).createOrder({
@@ -94,4 +109,6 @@ test("creates the ₹1 verification demo as exactly 100 paise", async () => {
 
   assert.equal((requests[0]?.order_amount as { value: number }).value, 100);
   assert.equal(requests[0]?.merchant_order_reference, "DEMO-2026-ABC123");
+  const payments = requests[1]?.payments as Array<Record<string, unknown>>;
+  assert.equal((payments[0]?.payment_amount as { value: number }).value, 100);
 });

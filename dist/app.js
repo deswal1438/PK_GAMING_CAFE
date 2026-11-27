@@ -17,6 +17,15 @@ const timeInput = document.querySelector("#startTime");
 const pricePreview = document.querySelector("#price-preview");
 const note = document.querySelector("#form-note");
 const toast = document.querySelector("#toast");
+const paymentQrPanel = document.querySelector("#payment-qr-panel");
+const paymentQrTitle = document.querySelector("#payment-qr-title");
+const paymentQrImage = document.querySelector("#payment-qr-image");
+const paymentQrCountdown = document.querySelector("#payment-qr-countdown");
+const paymentQrStatus = document.querySelector("#payment-qr-status");
+const paymentUpiIntent = document.querySelector("#payment-upi-intent");
+const paymentQrRetry = document.querySelector("#payment-qr-retry");
+let qrTimer;
+let paymentMonitorGeneration = 0;
 
 function formatINR(value) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
@@ -88,14 +97,14 @@ async function submitOnlineBooking(booking) {
       duration: booking.duration
     })
   });
-  const paymentSession = { bookingId: payload.bookingId, statusToken: payload.statusToken };
+  const paymentSession = { bookingId: payload.bookingId, statusToken: payload.statusToken, amount: payload.amount, payment: payload.payment };
   localStorage.setItem("pk-payment-session", JSON.stringify(paymentSession));
-  if (payload.payment?.checkoutUrl) {
-    setMessage(`Booking ${payload.bookingId} created. Opening secure Pine Labs checkout…`, true);
-    window.location.assign(payload.payment.checkoutUrl);
+  if (payload.payment?.qrImageUrl) {
+    setMessage(`Booking ${payload.bookingId} created. Scan the secure UPI QR to pay.`, true);
+    showPaymentQr(paymentSession);
     return;
   }
-  throw new Error("Secure payment checkout is unavailable; no booking was confirmed.");
+  throw new Error("Secure UPI QR is unavailable; no booking was confirmed.");
 }
 
 async function startOneRupeeDemo() {
@@ -106,16 +115,17 @@ async function startOneRupeeDemo() {
     return;
   }
   demoPaymentButton.disabled = true;
-  demoPaymentButton.textContent = "CREATING ₹1 CHECKOUT…";
+  demoPaymentButton.textContent = "CREATING ₹1 QR…";
   try {
     const payload = await apiRequest("/api/demo-bookings", {
       method: "POST",
       body: JSON.stringify({ customerName, phone })
     });
-    localStorage.setItem("pk-payment-session", JSON.stringify({ bookingId: payload.bookingId, statusToken: payload.statusToken }));
-    if (!payload.payment?.checkoutUrl) throw new Error("₹1 secure checkout is unavailable; no demo booking was created.");
-    setMessage(`₹1 demo ${payload.bookingId} created. Opening secure Pine Labs checkout…`, true);
-    window.location.assign(payload.payment.checkoutUrl);
+    const paymentSession = { bookingId: payload.bookingId, statusToken: payload.statusToken, amount: payload.amount, payment: payload.payment };
+    localStorage.setItem("pk-payment-session", JSON.stringify(paymentSession));
+    if (!payload.payment?.qrImageUrl) throw new Error("₹1 secure QR is unavailable; no demo booking was created.");
+    setMessage(`₹1 demo ${payload.bookingId} created. Scan the UPI QR to verify automatically.`, true);
+    showPaymentQr(paymentSession);
   } catch (error) {
     setMessage(error instanceof Error ? error.message : "₹1 demo could not be created.");
   } finally {
@@ -138,30 +148,113 @@ async function refreshPaymentStatus() {
   const session = JSON.parse(localStorage.getItem("pk-payment-session") || "null");
   const returnedBookingId = new URLSearchParams(window.location.search).get("bookingId");
   if (!session?.bookingId || !session?.statusToken || (returnedBookingId && returnedBookingId !== session.bookingId)) return;
+  if (session.payment?.qrImageUrl) {
+    showPaymentQr(session);
+    if (Date.parse(session.payment.expiresAt || "") <= Date.now()) await monitorPayment(session, Date.now() + 30_000);
+    return;
+  }
+  await monitorPayment(session, Date.now() + 30_000);
+}
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+function paymentSuccess(status) {
+  paymentMonitorGeneration += 1;
+  window.clearInterval(qrTimer);
+  paymentQrPanel.hidden = false;
+  paymentQrPanel.classList.add("is-success");
+  paymentQrImage.hidden = true;
+  paymentUpiIntent.hidden = true;
+  paymentQrRetry.hidden = true;
+  paymentQrCountdown.textContent = "PAID";
+  paymentQrStatus.textContent = status.bookingId.startsWith("DEMO-")
+    ? `₹1 payment verified automatically. Demo ${status.bookingId} is confirmed.`
+    : `Payment verified automatically. Booking ${status.bookingId} is confirmed.`;
+  setMessage(paymentQrStatus.textContent, true);
+  showToast("Payment verified — booking confirmed.");
+}
+
+async function monitorPayment(session, stopAt) {
+  const generation = ++paymentMonitorGeneration;
+  while (generation === paymentMonitorGeneration && Date.now() <= stopAt) {
     try {
       const status = await apiRequest(`/api/bookings/${encodeURIComponent(session.bookingId)}/payment-status`, {
         headers: { "x-booking-token": session.statusToken }
       });
       if (status.paymentStatus === "SUCCESS") {
-        const message = status.bookingId.startsWith("DEMO-")
-          ? `₹1 payment verified automatically. Demo ${status.bookingId} is CONFIRMED.`
-          : `Payment verified automatically. Booking ${status.bookingId} is confirmed.`;
-        setMessage(message, true);
-        showToast("Payment verified — booking confirmed.");
+        paymentSuccess(status);
         return;
       }
       if (["FAILED", "REFUNDED"].includes(status.paymentStatus)) {
-        setMessage(`Payment status: ${status.paymentStatus}. Retry secure checkout; no screenshot is needed.`);
+        paymentQrStatus.textContent = `Payment status: ${status.paymentStatus}. Generate a new QR if needed.`;
+        paymentQrRetry.hidden = false;
+        setMessage(paymentQrStatus.textContent);
         return;
       }
-      setMessage(`Payment received by checkout; verification is still pending for ${status.bookingId}.`, true);
+      paymentQrStatus.textContent = `Waiting for Pine Labs confirmation for ${status.bookingId}…`;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not check payment status.");
+      paymentQrStatus.textContent = error instanceof Error ? error.message : "Could not check payment status.";
       return;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    await new Promise((resolve) => window.setTimeout(resolve, 5000));
+  }
+}
+
+function showPaymentQr(session) {
+  const payment = session.payment;
+  const expiry = Date.parse(payment?.expiresAt || "");
+  if (!payment?.qrImageUrl || !Number.isFinite(expiry)) return;
+  paymentMonitorGeneration += 1;
+  window.clearInterval(qrTimer);
+  paymentQrPanel.hidden = false;
+  paymentQrPanel.classList.remove("is-success", "is-expired");
+  paymentQrTitle.textContent = session.amount ? `Scan to pay ${formatINR(session.amount)}` : `Scan to pay for ${session.bookingId}`;
+  paymentQrImage.src = payment.qrImageUrl;
+  paymentQrImage.hidden = false;
+  paymentQrStatus.textContent = "Waiting for automatic payment confirmation…";
+  paymentQrRetry.hidden = true;
+  paymentUpiIntent.hidden = !payment.upiIntentUrl;
+  if (payment.upiIntentUrl) paymentUpiIntent.href = payment.upiIntentUrl;
+
+  const updateTimer = () => {
+    const remaining = Math.max(0, expiry - Date.now());
+    const totalSeconds = Math.ceil(remaining / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    paymentQrCountdown.textContent = `${minutes}:${seconds}`;
+    if (remaining === 0) {
+      window.clearInterval(qrTimer);
+      paymentMonitorGeneration += 1;
+      paymentQrPanel.classList.add("is-expired");
+      paymentQrImage.hidden = true;
+      paymentUpiIntent.hidden = true;
+      paymentQrRetry.hidden = false;
+      paymentQrStatus.textContent = "QR timer expired. Generate a new dynamic QR; no screenshot is required.";
+    }
+  };
+  updateTimer();
+  qrTimer = window.setInterval(updateTimer, 1000);
+  monitorPayment(session, expiry + 10_000);
+  paymentQrPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function retryPaymentQr() {
+  const session = JSON.parse(localStorage.getItem("pk-payment-session") || "null");
+  if (!session?.bookingId || !session?.statusToken) return;
+  paymentQrRetry.disabled = true;
+  paymentQrRetry.textContent = "GENERATING…";
+  try {
+    const payload = await apiRequest(`/api/bookings/${encodeURIComponent(session.bookingId)}/payment-session`, {
+      method: "POST",
+      headers: { "x-booking-token": session.statusToken }
+    });
+    if (!payload.payment?.qrImageUrl) throw new Error("Pine Labs did not return a new QR.");
+    session.payment = payload.payment;
+    localStorage.setItem("pk-payment-session", JSON.stringify(session));
+    showPaymentQr(session);
+  } catch (error) {
+    paymentQrStatus.textContent = error instanceof Error ? error.message : "Could not generate a new QR.";
+  } finally {
+    paymentQrRetry.disabled = false;
+    paymentQrRetry.textContent = "GENERATE NEW QR";
   }
 }
 
@@ -216,12 +309,13 @@ form.addEventListener("submit", async (event) => {
 serviceInput.addEventListener("change", syncResources);
 durationInput.addEventListener("change", updatePrice);
 demoPaymentButton.addEventListener("click", startOneRupeeDemo);
+paymentQrRetry.addEventListener("click", retryPaymentQr);
 makeTimeOptions();
 setMinimumDate();
 syncResources();
 if (API_BASE_URL) {
   submitButton.textContent = "BOOK & PAY SECURELY";
-  note.textContent = "Payment is verified server-side through Pine Labs webhooks; screenshots are not accepted as proof.";
+  note.textContent = "A timed UPI QR appears here. Payment is verified automatically; no upload is required.";
   showDemoWhenEnabled();
   refreshPaymentStatus();
 } else {
